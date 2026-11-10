@@ -32,3 +32,10 @@ usage/*.bak*
 # 本地打包产物（部署归档不应进入源码仓库）
 dist/
 .venv/
+
+# Background launcher runtime (PID and logs)
+run/
+
+# Local logs and repair backups
+logs/
+*.bak*

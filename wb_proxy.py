@@ -3118,6 +3118,22 @@ def responses_to_chat(payload):
                             prev["content"] = body
                     else:
                         append_message({"role": role, "content": body})
+            elif (itype == "function_call_output"
+                  and not item.get("call_id")
+                  and item.get("namespace") == "agent"
+                  and (item.get("name") == "codex_apps_open_page"
+                       or str(item.get("name") or "").startswith("codex_apps_selected_page_part_"))):
+                # Codex desktop injects page snapshots without a corresponding
+                # tool call. Preserve them as context, never as orphan tool results.
+                raw_out = item.get("output")
+                if isinstance(raw_out, str):
+                    context = raw_out
+                else:
+                    context = json.dumps(raw_out, ensure_ascii=False)
+                append_message({
+                    "role": "user",
+                    "content": "Codex desktop page context (%s):\n%s" % (item["name"], context),
+                })
             elif itype == "function_call_output":
                 raw_out = item.get("output")
                 if isinstance(raw_out, list):
@@ -4946,6 +4962,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._begin_request()
         path = self.path.split("?")[0]
+        if path == "/internal/shutdown":
+            # Enabled only when the background launcher injects a per-run
+            # secret. Foreground launches have no token, so this route is 404.
+            expected = os.environ.get("WB_SHUTDOWN_TOKEN") or ""
+            supplied = self.headers.get("X-WB-Shutdown-Token") or ""
+            if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+                return self._error(404, "not found", "invalid_request_error")
+            self._json(200, {"ok": True, "shutting_down": True})
+            threading.Thread(
+                target=self.server.shutdown,
+                name="wb-shutdown",
+                daemon=True,
+            ).start()
+            return
         if path == "/settings/save":
             if not self._key_ok():
                 return self._error(401, "login required", "invalid_request_error")
